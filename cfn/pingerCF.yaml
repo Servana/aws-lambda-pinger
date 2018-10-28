@@ -1,0 +1,164 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+    SAM Lambda template which pings the web urls asynchronous, capture metrics in cloud watch and optionally enables 
+    slack notifications
+Parameters:
+  Organisation:
+    Type: String
+    Description: Enter the organisation name
+  Environment:
+    Type: String
+    Description: Enter the environment name
+  BucketName:
+    Type: String
+    Description: Enter the S3 bucket name to store source code artifacts used by lambda
+  ArtifactName:
+    Type: String
+    Description: Enter the source code archieve file name
+  MonitoringFrequency:
+    Type: String
+    Description: Choose the monitoring frequency
+    Default: "rate(5 minutes)"
+  CustomMetricFilters:
+    Type: String
+    Description: Flag to enable customer metric filter
+    Default: disable
+    AllowedValues:
+    - 'enable'
+    - 'disable'
+  # AlarmNotificationTopic:
+  #   Type: String     
+
+Conditions:
+  EnableCustomMetrics: !Equals [ !Ref CustomMetricFilters, enable ]
+Resources:
+  Pinger:
+      Type: AWS::Serverless::Function
+      Properties:
+        FunctionName: 'pinger'
+        CodeUri: 
+          Bucket: !Ref BucketName
+          Key: !Ref ArtifactName
+        Handler: pinger.ping_handler
+        Runtime: python3.6
+        Policies:
+          - AWSLambdaExecute
+          - Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:Get*
+                  - s3:Put*
+                Resource: 
+                  - !Sub "arn:aws:s3:::${BucketName}/"
+                  - !Sub "arn:aws:s3:::${BucketName}/*"
+              - Effect: Allow
+                Action:
+                  - ssm:DescribeParameters
+                  - ssm:GetParameters
+                  - ssm:GetParameter
+                  - ssm:GetParametersByPath
+                Resource: 
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/slack*"
+        Timeout: 120
+        MemorySize: 128
+        Tags:
+          Organisation: !Ref Organisation
+          Environment: !Ref Environment
+  
+  ScheduledEventRule:
+    Type: "AWS::Events::Rule"
+    Properties:
+      Description: "ScheduledRule"
+      ScheduleExpression: !Ref MonitoringFrequency
+      State: "ENABLED"
+      Targets:
+        -
+          Arn: !GetAtt Pinger.Arn
+          Id: "Pingerv1"
+          Input: '{}'
+  
+  PermissionForEventsToInvokeLambda:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      FunctionName: !Ref "Pinger"
+      Action: "lambda:InvokeFunction"
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt ScheduledEventRule.Arn
+
+  4XXMetricFilter: 
+    Condition: EnableCustomMetrics
+    Type: AWS::Logs::MetricFilter
+    Properties: 
+      LogGroupName: '/aws/lambda/pinger'
+      FilterPattern: '{$.message.StatusCode = 4*}'
+      MetricTransformations: 
+        - 
+          MetricValue: "1"
+          MetricNamespace: "Pinger/4XX"
+          MetricName: "4XXCount"
+
+
+  5XXMetricFilter:
+    Condition: EnableCustomMetrics
+    Type: AWS::Logs::MetricFilter
+    Properties: 
+      LogGroupName: '/aws/lambda/pinger'
+      FilterPattern: '{$.message.StatusCode = 5*}'
+      MetricTransformations: 
+        - 
+          MetricValue: "1"
+          MetricNamespace: "Pinger/5XX"
+          MetricName: "5XXCount"
+
+  4XXAlarm:
+    Condition: EnableCustomMetrics
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: The number of 4XX is greater than 1 over 5 minutes
+      MetricName: 4XXCount
+      Namespace: Pinger/4XX
+      Statistic: Sum
+      Period: '300'
+      EvaluationPeriods: '1'
+      Threshold: '0'
+      TreatMissingData: ignore
+      # AlarmActions:
+      # - !Ref 'AlarmNotificationTopic'
+      ComparisonOperator: GreaterThanThreshold
+
+  5XXAlarm:
+    Condition: EnableCustomMetrics
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: The number of 5XX is greater than 1 over 5 minutes
+      MetricName: 5XXCount
+      Namespace: Pinger/5XX
+      Statistic: Sum
+      Period: '300'
+      EvaluationPeriods: '1'
+      Threshold: '0'
+      TreatMissingData: ignore
+      # AlarmActions:
+      # - !Ref 'AlarmNotificationTopic'
+      ComparisonOperator: GreaterThanThreshold
+
+  # Analytics:
+  #   Type: AWS::Logs::SubscriptionFilter
+  #   DependsOn:
+  #     - ClusterLogGroup
+  #   Properties:
+  #     LogGroupName: !Ref LambdaLogGroup
+  #     FilterPattern: '{}'
+  #     DestinationArn: !Ref ElasticSearcharn
+
+
+Outputs:
+  LambdaFunctionArn:
+    Description: "EBS Snapshot Manager Lambda Function ARN"
+    Value: !GetAtt Pinger.Arn
+
+  LambdaFunctionIamRole:
+    Description: "Implicit IAM Role created for Lambda function"
+    Value: !GetAtt Pinger.Arn
