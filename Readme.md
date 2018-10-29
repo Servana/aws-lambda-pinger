@@ -26,4 +26,4 @@ Approx. AWS costs for lambda to monitor 10 URLs with the scheduled frequency of 
 
 ![Comparison](Images/comparison.png/?raw=true "Comparison")
 
-Refer the wiki page for more detailed documentation. [go to wiki page](https://github.com/Servana/24x7-website-monitoring-lambda/wiki)
+Refer the wiki page for more detailed documentation. [go to wiki page](https://github.com/Servana/24x7-webapps-monitoring-lambda/wiki)
