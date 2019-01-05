@@ -10,7 +10,7 @@ idna==2.7
 jmespath==0.9.3
 multidict==4.4.2
 python-dateutil==2.7.3
-PyYAML==3.13
+pyyaml~>4.2b1
 s3transfer==0.1.13
 six==1.11.0
 slackweb==1.0.5
